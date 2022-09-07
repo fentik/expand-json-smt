@@ -1,4 +1,4 @@
-package com.redhat.insights.expandjsonsmt;
+package com.fentik.dataflo.expandjsonsmt;
 
 import java.util.Map.Entry;
 

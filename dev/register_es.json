@@ -11,7 +11,7 @@
         "transforms.unwrap.type": "io.debezium.transforms.UnwrapFromEnvelope",
         "transforms.extract.type": "org.apache.kafka.connect.transforms.ExtractField$Key",
         "transforms.extract.field": "id",
-        "transforms.expand.type": "com.redhat.insights.expandjsonsmt.ExpandJSON$Value",
+        "transforms.expand.type": "com.fentik.dataflo.expandjsonsmt.ExpandJSON$Value",
         "transforms.expand.sourceFields": "metadata,logs,tags"
     }
 }

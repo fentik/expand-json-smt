@@ -1,4 +1,4 @@
-package com.redhat.insights.expandjsonsmt;
+package com.fentik.dataflo.expandjsonsmt;
 
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;

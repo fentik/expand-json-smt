@@ -7,7 +7,7 @@ Use it in connector config file like this:
 ~~~json
 ...
 "transforms": "expand",
-"transforms.expand.type": "com.redhat.insights.expandjsonsmt.ExpandJSON$Value",
+"transforms.expand.type": "com.fentik.dataflo.expandjsonsmt.ExpandJSON$Value",
 "transforms.expand.sourceFields": "metadata"
 ...
 ~~~
