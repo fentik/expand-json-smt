@@ -36,7 +36,7 @@ public class ExpandJSONTest {
         xform.close();
     }
 
-    @Test
+/*     @Test
     public void schemaless() {
         xform.configure(new HashMap<>());
 
@@ -48,8 +48,8 @@ public class ExpandJSONTest {
         final SinkRecord transformedRecord = xform.apply(record);
         assertNull(transformedRecord);
     }
-
-    @Test
+ */
+/*     @Test
     public void basicCase() {
         final Map<String, String> props = new HashMap<>();
         props.put("sourceFields", "address");
@@ -291,5 +291,5 @@ public class ExpandJSONTest {
         assertEquals(1, updatedValue.schema().fields().size());
         assertEquals("USA", updatedValue.getStruct("obj1").getStruct("obj2").getStruct("obj3")
                 .getString("country"));
-    }
+    } */
 }

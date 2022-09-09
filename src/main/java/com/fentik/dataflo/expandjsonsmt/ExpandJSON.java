@@ -20,24 +20,21 @@ import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.connect.connector.ConnectRecord;
 import org.apache.kafka.connect.transforms.Transformation;
 import org.apache.kafka.connect.transforms.util.SimpleConfig;
-import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
-import org.apache.kafka.connect.data.SchemaBuilder;
-import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.DataException;
 
-import org.bson.BsonArray;
-import org.bson.BsonDocument;
-import org.bson.BsonString;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.kafka.connect.transforms.util.Requirements.requireStruct;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import static org.apache.kafka.connect.transforms.util.Requirements.requireMap;
 
 /**
  * Main project class implementing JSON string transformation.
@@ -47,36 +44,75 @@ abstract class ExpandJSON<R extends ConnectRecord<R>> implements Transformation<
     private static final Logger LOGGER = LoggerFactory.getLogger(ExpandJSON.class);
 
     interface ConfigName {
-        String SOURCE_FIELDS = "sourceFields";
+        String TARGET_JSON_ARRAY = "targetField";
+        String SPLICE_FIELD = "spliceField";
+        String OUTPUT_FIELDS = "outputFields";
     }
 
     private static final ConfigDef CONFIG_DEF = new ConfigDef()
-            .define(ConfigName.SOURCE_FIELDS, ConfigDef.Type.LIST, "", ConfigDef.Importance.MEDIUM,
-                    "Source field name. This field will be expanded to json object.");
+            .define(ConfigName.TARGET_JSON_ARRAY, ConfigDef.Type.STRING, "", ConfigDef.Importance.MEDIUM,
+                    "Source field name. This field will be expanded to a json array object.")
+            .define(ConfigName.SPLICE_FIELD, ConfigDef.Type.STRING, "", ConfigDef.Importance.MEDIUM,
+                    "The name of the child field that should be used to flatten the array object.")
+            .define(ConfigName.OUTPUT_FIELDS, ConfigDef.Type.LIST, "", ConfigDef.Importance.MEDIUM,
+                    "List of path for variables in the json object that should be stored in the output");
 
-    private static final String PURPOSE = "json field expansion";
+    private static final String PURPOSE = "expand json";
 
-    private List<String> sourceFields;
-    private String delimiterSplit = "\\.";
-    private String delimiterJoin = ".";
+    private String sourceFields;
+    private String childFieldName;
+    // The list of fields in the JSON object that we should emit.
+    private List<String> childOutputFields;
+    // For nested JSON objects (we only support 1-level), the fields that should be emitted as a field of the new JSON object.
+    private Map<String, List<String> > grandChildOutputFields;
+
 
     @Override
     public void configure(Map<String, ?> configs) {
         final SimpleConfig config = new SimpleConfig(CONFIG_DEF, configs);
-        sourceFields = config.getList(ConfigName.SOURCE_FIELDS);
+        sourceFields = config.getString(ConfigName.TARGET_JSON_ARRAY);
+        childFieldName = config.getString(ConfigName.SPLICE_FIELD);
+        List<String> outputFields = config.getList(ConfigName.OUTPUT_FIELDS);
+
+        childOutputFields = new ArrayList<String>();
+        grandChildOutputFields = new HashMap<String, List<String> >();
+
+        // Now, find the fields that we are supposed to emit.
+        for (int i = 0; i < outputFields.size(); i++) {
+            String s = outputFields.get(i);
+            String[] result = s.split("[.]");
+            if (result.length > 2) {
+                LOGGER.info("We only supported 1-level nested fields for output.");
+                continue;
+            }
+            if (result.length == 1) {
+                LOGGER.info("We need to emit " + result[0]);
+                childOutputFields.add(result[0]);
+            }
+            if (result.length == 2) {
+                LOGGER.info("We need to emit " + result[0] + " . " + result[1]);
+                List<String> grandChildList = grandChildOutputFields.get(result[0]);
+                if (grandChildList == null) {
+                    grandChildList = new ArrayList<String>();
+                    grandChildOutputFields.put(result[0], grandChildList);
+                }
+                grandChildList.add(result[1]);
+            }
+        }
     }
 
     @Override
     public R apply(R record) {
         if (operatingSchema(record) == null) {
-            LOGGER.info("Schemaless records not supported");
-            return null;
+            return applyWithoutSchema(record);
         } else {
-            return applyWithSchema(record);
+            LOGGER.info("Records with schemas are not supported");
+            return null;
         }
     }
 
-    private R applyWithSchema(R record) {
+
+    private R applyWithoutSchema(R record) {
         try {
             Object recordValue = operatingValue(record);
             if (recordValue == null) {
@@ -84,125 +120,68 @@ abstract class ExpandJSON<R extends ConnectRecord<R>> implements Transformation<
                 LOGGER.info(record.toString());
                 return record;
             }
+            // Walk through the record.
+            // 1. If the field name matches the sourceField
+            // 2. Read the value of the field into JSON
+            // 3. Expect it to be an array
+            // 4. For each JSON, use "SPLICE_FIELD" to create the name of new field
+            // 5. Generate a new JSONObject that only has fields mentioned in OUTPUT_FIELDS.
+            // 6. Convert it into the map and emit it
+            final Map<String, Object> value = requireMap(operatingValue(record), PURPOSE);
+            final Map<String, Object> newValue = new HashMap<>(value.size());
 
-            final Struct value = requireStruct(recordValue, PURPOSE);
-            final HashMap<String, BsonDocument> jsonParsedFields = parseJsonFields(value, sourceFields, delimiterSplit);
-
-            final Schema updatedSchema = makeUpdatedSchema(null, value, jsonParsedFields);
-            final Struct updatedValue = makeUpdatedValue(null, value, updatedSchema, jsonParsedFields);
-
-            return newRecord(record, updatedSchema, updatedValue);
+            for (Map.Entry<String, Object> e : value.entrySet()) {
+                final String fieldName = e.getKey();
+                if (sourceFields.equals(fieldName)) {
+                    // We assume the field is a string that encodes a JSON array.
+                    JSONArray array = new JSONArray(e.getValue().toString());
+                    for (int i = 0; i < array.length(); i++) {
+                        JSONObject childObj = array.getJSONObject(i);
+                        Object childField = childObj.get(childFieldName);
+                        if (childField != null) {
+                            String newFieldName = fieldName + "_" + childField.toString();
+                            // Now, get the child (and granchild) fields from the object to
+                            // childObj.remove(childFieldName);
+                            JSONObject newChildObject = new JSONObject();
+                            for (int j = 0; j < childOutputFields.size(); j++) {
+                                Object obj = childObj.get(childOutputFields.get(j));
+                                if (obj == null) {
+                                    LOGGER.error("Failed to find " + childOutputFields.get(j) + " in " + childObj.toString());
+                                } else {
+                                    newChildObject.put(childOutputFields.get(j),obj);
+                                }
+                            }
+                            for (Map.Entry<String, List<String>> grandChildEntry : grandChildOutputFields.entrySet()) {
+                                String nestedChildFieldName = grandChildEntry.getKey();
+                                JSONObject nestedChildObj = childObj.getJSONObject(nestedChildFieldName);
+                                if (nestedChildObj == null) {
+                                    LOGGER.error("Failed to find " + nestedChildFieldName + " in " + childObj.toString());
+                                } else {
+                                    List<String> grandChildFieldNames = grandChildEntry.getValue();
+                                    for (int k = 0; k < grandChildFieldNames.size(); k++) {
+                                        Object obj = nestedChildObj.get(grandChildFieldNames.get(i));
+                                        if (obj == null) {
+                                            LOGGER.error("Failed to find " + grandChildFieldNames.get(k) + " in nested child " + nestedChildObj.toString());
+                                        } else {
+                                            newChildObject.put(grandChildFieldNames.get(k), obj);
+                                        }
+                                    }
+                                }
+                            }
+                            // Convert the JSON object to a map before storing it.
+                            Map<String, Object> output = childObj.toMap();
+                            newValue.put(newFieldName, output);
+                        }
+                    }
+                } else {
+                    newValue.put(e.getKey(), e.getValue());
+                }
+            }
+            return newRecord(record, null, newValue);
         } catch (DataException e) {
             LOGGER.warn("ExpandJSON fields missing from record: " + record.toString(), e);
             return record;
         }
-    }
-
-    private static String getStringValue(List<String> path, Struct value) {
-        if (path.isEmpty()) {
-            return null;
-        } else if (path.size() == 1) {
-            return value.getString(path.get(0));
-        } else {
-            return getStringValue(path.subList(1, path.size()), value.getStruct(path.get(0)));
-        }
-    }
-
-    /**
-     * Parse JSON objects from given string fields.
-     * @param value Input record to read original string fields.
-     * @param sourceFields List of fields to parse JSON objects from.
-     * @return Collection of parsed JSON objects with field names.
-     */
-    private static HashMap<String, BsonDocument> parseJsonFields(Struct value, List<String> sourceFields,
-                                                                 String levelDelimiter) {
-        final HashMap<String, BsonDocument> bsons = new HashMap<>(sourceFields.size());
-        for(String field : sourceFields){
-            BsonDocument val;
-            String[] pathArr = field.split(levelDelimiter);
-            List<String> path = Arrays.asList(pathArr);
-            final String jsonString = getStringValue(path, value);
-            if (jsonString == null) {
-                val = null;
-            } else {
-                try {
-                    if (jsonString.startsWith("{")) {
-                        val = BsonDocument.parse(jsonString);
-                    } else if (jsonString.startsWith("[")) {
-                        final BsonArray bsonArray = BsonArray.parse(jsonString);
-                        val = new BsonDocument();
-                        val.put("array", bsonArray);
-                    } else {
-                        String msg = String.format("Unable to parse filed '%s' starting with '%s'", field, jsonString.charAt(0));
-                        throw new Exception(msg);
-                    }
-                } catch (Exception ex) {
-                    LOGGER.warn(ex.getMessage(), ex);
-                    val = new BsonDocument();
-                    val.put("value", new BsonString(jsonString));
-                    val.put("error", new BsonString(ex.getMessage()));
-                }
-            }
-            bsons.put(field, val);
-        }
-        return bsons;
-    }
-
-    /**
-     * Copy original fields value or take parsed JSONS from collection.
-     * @param value Input value to copy fields from.
-     * @param updatedSchema Schema for new output record.
-     * @param jsonParsedFields Parsed JSON objects.
-     * @return Output record with parsed JSON values.
-     */
-    private Struct makeUpdatedValue(String parentKey, Struct value, Schema updatedSchema, HashMap<String, BsonDocument> jsonParsedFields) {
-        final Struct updatedValue = new Struct(updatedSchema);
-        for (Field field : value.schema().fields()) {
-            final Object fieldValue;
-            final String absoluteKey = joinKeys(parentKey, field.name());
-            if (jsonParsedFields.containsKey(absoluteKey)) {
-                final BsonDocument parsedValue = jsonParsedFields.get(absoluteKey);
-                fieldValue = DataConverter.jsonStr2Struct(parsedValue,
-                        updatedSchema.field(field.name()).schema());
-            } else if (field.schema().type().equals(Schema.Type.STRUCT)) {
-                fieldValue = makeUpdatedValue(absoluteKey, value.getStruct(field.name()),
-                        updatedSchema.field(field.name()).schema(), jsonParsedFields);
-            } else {
-                fieldValue = value.get(field.name());
-            }
-            updatedValue.put(field.name(), fieldValue);
-        }
-        return updatedValue;
-    }
-
-    private String joinKeys(String parent, String child) {
-        if (parent == null) {
-            return child;
-        }
-        return parent + delimiterJoin + child;
-    }
-
-    /**
-     * Update schema using JSON template from config.
-     * @param value Input value to take basic schema from.
-     * @param jsonParsedFields Values of parsed json string fields.
-     * @return New schema for output record.
-     */
-    private Schema makeUpdatedSchema(String parentKey, Struct value, HashMap<String, BsonDocument> jsonParsedFields) {
-        final SchemaBuilder builder = SchemaBuilder.struct();
-        for (Field field : value.schema().fields()) {
-            final Schema fieldSchema;
-            final String absoluteKey = joinKeys(parentKey, field.name());
-            if (jsonParsedFields.containsKey(absoluteKey)) {
-                fieldSchema = SchemaParser.bsonDocument2Schema(jsonParsedFields.get(absoluteKey));
-            } else if (field.schema().type().equals(Schema.Type.STRUCT)) {
-                fieldSchema = makeUpdatedSchema(absoluteKey, value.getStruct(field.name()), jsonParsedFields);
-            } else {
-                fieldSchema = field.schema();
-            }
-            builder.field(field.name(), fieldSchema);
-        }
-        return builder.build();
     }
 
     @Override
