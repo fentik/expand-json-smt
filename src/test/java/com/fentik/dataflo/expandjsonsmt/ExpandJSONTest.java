@@ -16,15 +16,13 @@
  */
 package com.fentik.dataflo.expandjsonsmt;
 
-import org.apache.kafka.connect.data.Schema;
-import org.apache.kafka.connect.data.SchemaBuilder;
-import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.junit.After;
 import org.junit.Test;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.ArrayList;
 
 import static org.junit.Assert.*;
 
@@ -52,26 +50,53 @@ public class ExpandJSONTest {
 /*     @Test
     public void basicCase() {
         final Map<String, String> props = new HashMap<>();
-        props.put("sourceFields", "address");
+        props.put("targetField", "agg_person_custom_fields");
+        props.put("spliceField", "team_category_ordinal_number");
+        props.put("outputField", "custom_field_values");
 
         xform.configure(props);
 
-        final Schema schema = SchemaBuilder.struct()
-                .field("address", Schema.STRING_SCHEMA)
-                .build();
 
-        final Struct value = new Struct(schema);
-        value.put("address","{\"city\":\"Studenec\",\"code\":123}");
+        final Map<String, Object> value = new HashMap<>();
+        value.put("name", "Josef");
+        value.put("age", 42);
+        value.put("agg_person_custom_fields", "[{\"custom_field_values\":\"[{\\\"date_ts\\\":null,\\\"option_id\\\":23561,\\\"option_value\\\":\\\"URT\\\"}]\",\"team_category_ordinal_number\":8},{\"custom_field_values\":\"[{\\\"date_ts\\\":null,\\\"option_id\\\":16327,\\\"option_value\\\":\\\"Female\\\"}]\",\"team_category_ordinal_number\":5}]");
 
-        final SinkRecord record = new SinkRecord("test", 0, null, null, schema, value, 0);
+        final SinkRecord record = new SinkRecord("test", 0, null, null, null, value, 0);
         final SinkRecord transformedRecord = xform.apply(record);
 
-        final Struct updatedValue = (Struct) transformedRecord.value();
-        assertEquals(1, updatedValue.schema().fields().size());
-        assertEquals("Studenec", updatedValue.getStruct("address").getString("city"));
-        assertEquals(new Integer(123), updatedValue.getStruct("address").getInt32("code"));
+        assertNull(transformedRecord);
+    }
+ */
+    @Test
+    public void basicCase2() {
+        final Map<String, String> props = new HashMap<>();
+        props.put("targetField", "agg_person_custom_fields");
+        props.put("spliceField", "team_category_ordinal_number");
+        props.put("outputField", "custom_field_values");
+        props.put("outputFieldType", "json_array");
+
+        xform.configure(props);
+
+
+        final Map<String, Object> value = new HashMap<>();
+        value.put("name", "Josef");
+        value.put("age", 42);
+        value.put("agg_person_custom_fields", "[{\"custom_field_values\":\"[{\\\"date_ts\\\":null,\\\"option_id\\\":22702,\\\"option_value\\\":\\\"AI\\\"},{\\\"date_ts\\\":null,\\\"option_id\\\":22694,\\\"option_value\\\":\\\"MI\\\"}]\",\"team_category_ordinal_number\":1}]");
+
+        final SinkRecord record = new SinkRecord("test", 0, null, null, null, value, 0);
+        final SinkRecord transformedRecord = xform.apply(record);
+
+        final Map<String, Object> updatedValue = (Map<String, Object>) transformedRecord.value();
+        assertEquals("Josef", updatedValue.get("name"));
+        assertEquals(42, updatedValue.get("age"));
+        ArrayList<Map<String, Object>> output = (ArrayList<Map<String, Object>>) updatedValue.get("agg_person_custom_fields_1");
+        assertEquals(2, output.size());
+        assertEquals(22702, output.get(0).get("option_id"));
+        assertEquals("AI", output.get(0).get("option_value"));
     }
 
+    /*
     @Test
     public void missingField() {
         final Map<String, String> props = new HashMap<>();

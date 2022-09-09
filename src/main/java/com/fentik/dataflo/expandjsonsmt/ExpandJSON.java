@@ -26,9 +26,10 @@ import org.apache.kafka.connect.errors.DataException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 import org.json.JSONArray;
@@ -46,7 +47,8 @@ abstract class ExpandJSON<R extends ConnectRecord<R>> implements Transformation<
     interface ConfigName {
         String TARGET_JSON_ARRAY = "targetField";
         String SPLICE_FIELD = "spliceField";
-        String OUTPUT_FIELDS = "outputFields";
+        String OUTPUT_FIELD = "outputField";
+        String OUTPUT_FIELD_TYPE = "outputFieldType";
     }
 
     private static final ConfigDef CONFIG_DEF = new ConfigDef()
@@ -54,51 +56,26 @@ abstract class ExpandJSON<R extends ConnectRecord<R>> implements Transformation<
                     "Source field name. This field will be expanded to a json array object.")
             .define(ConfigName.SPLICE_FIELD, ConfigDef.Type.STRING, "", ConfigDef.Importance.MEDIUM,
                     "The name of the child field that should be used to flatten the array object.")
-            .define(ConfigName.OUTPUT_FIELDS, ConfigDef.Type.LIST, "", ConfigDef.Importance.MEDIUM,
-                    "List of path for variables in the json object that should be stored in the output");
+            .define(ConfigName.OUTPUT_FIELD, ConfigDef.Type.STRING, "", ConfigDef.Importance.MEDIUM,
+                    "List of path for variables in the json object that should be stored in the output")
+            .define(ConfigName.OUTPUT_FIELD_TYPE, ConfigDef.Type.STRING, "", ConfigDef.Importance.MEDIUM,
+                    "If the output field is JSON or JSON object, set it to 'json' or 'json_array'");
 
     private static final String PURPOSE = "expand json";
 
-    private String sourceFields;
+    private String targetFieldName;
     private String childFieldName;
-    // The list of fields in the JSON object that we should emit.
-    private List<String> childOutputFields;
-    // For nested JSON objects (we only support 1-level), the fields that should be emitted as a field of the new JSON object.
-    private Map<String, List<String> > grandChildOutputFields;
+    private String outputFieldName;
+    private String outputFieldType;
 
 
     @Override
     public void configure(Map<String, ?> configs) {
         final SimpleConfig config = new SimpleConfig(CONFIG_DEF, configs);
-        sourceFields = config.getString(ConfigName.TARGET_JSON_ARRAY);
+        targetFieldName = config.getString(ConfigName.TARGET_JSON_ARRAY);
         childFieldName = config.getString(ConfigName.SPLICE_FIELD);
-        List<String> outputFields = config.getList(ConfigName.OUTPUT_FIELDS);
-
-        childOutputFields = new ArrayList<String>();
-        grandChildOutputFields = new HashMap<String, List<String> >();
-
-        // Now, find the fields that we are supposed to emit.
-        for (int i = 0; i < outputFields.size(); i++) {
-            String s = outputFields.get(i);
-            String[] result = s.split("[.]");
-            if (result.length > 2) {
-                LOGGER.info("We only supported 1-level nested fields for output.");
-                continue;
-            }
-            if (result.length == 1) {
-                LOGGER.info("We need to emit " + result[0]);
-                childOutputFields.add(result[0]);
-            }
-            if (result.length == 2) {
-                LOGGER.info("We need to emit " + result[0] + " . " + result[1]);
-                List<String> grandChildList = grandChildOutputFields.get(result[0]);
-                if (grandChildList == null) {
-                    grandChildList = new ArrayList<String>();
-                    grandChildOutputFields.put(result[0], grandChildList);
-                }
-                grandChildList.add(result[1]);
-            }
-        }
+        outputFieldName = config.getString(ConfigName.OUTPUT_FIELD);
+        outputFieldType = config.getString(ConfigName.OUTPUT_FIELD_TYPE);
     }
 
     @Override
@@ -111,6 +88,30 @@ abstract class ExpandJSON<R extends ConnectRecord<R>> implements Transformation<
         }
     }
 
+
+    /* We need to handle any nested type that is not supported by kafka connect JSONConvertor
+       (like BigDecimal and BigInteger (or nested JSONObjects/JSONArrays)). We convert them
+       into string (since it works for Gem's current use case), but this is obviously not as
+        generic as we would like - The right answer lies in defining an explicit schema.
+    */
+    private Map<String, Object> jsonMap(JSONObject jsonObject) {
+        Map<String, Object> map = jsonObject.toMap();
+        Map<String, Object> retVal = new HashMap<String, Object>(map.size());
+        for (Map.Entry<String, Object> e : map.entrySet()) {
+            Object val = e.getValue();
+            if (val == null) {
+                retVal.put(e.getKey(), null);
+            } else {
+                if (val instanceof BigDecimal || val instanceof BigInteger ||
+                    val instanceof JSONArray || val instanceof JSONObject) {
+                    retVal.put(e.getKey(), val.toString());
+                } else {
+                    retVal.put(e.getKey(), val);
+                }
+            }
+        }
+        return retVal;
+    }
 
     private R applyWithoutSchema(R record) {
         try {
@@ -132,7 +133,7 @@ abstract class ExpandJSON<R extends ConnectRecord<R>> implements Transformation<
 
             for (Map.Entry<String, Object> e : value.entrySet()) {
                 final String fieldName = e.getKey();
-                if (sourceFields.equals(fieldName)) {
+                if (targetFieldName.equals(fieldName)) {
                     // We assume the field is a string that encodes a JSON array.
                     JSONArray array = new JSONArray(e.getValue().toString());
                     for (int i = 0; i < array.length(); i++) {
@@ -140,37 +141,27 @@ abstract class ExpandJSON<R extends ConnectRecord<R>> implements Transformation<
                         Object childField = childObj.get(childFieldName);
                         if (childField != null) {
                             String newFieldName = fieldName + "_" + childField.toString();
-                            // Now, get the child (and granchild) fields from the object to
-                            // childObj.remove(childFieldName);
-                            JSONObject newChildObject = new JSONObject();
-                            for (int j = 0; j < childOutputFields.size(); j++) {
-                                Object obj = childObj.get(childOutputFields.get(j));
-                                if (obj == null) {
-                                    LOGGER.error("Failed to find " + childOutputFields.get(j) + " in " + childObj.toString());
-                                } else {
-                                    newChildObject.put(childOutputFields.get(j),obj);
-                                }
+                            Object obj = childObj.get(outputFieldName);
+                            if (obj == null) {
+                                LOGGER.error("Failed to find " + outputFieldName + " in " + childObj.toString());
+                                continue;
                             }
-                            for (Map.Entry<String, List<String>> grandChildEntry : grandChildOutputFields.entrySet()) {
-                                String nestedChildFieldName = grandChildEntry.getKey();
-                                JSONObject nestedChildObj = childObj.getJSONObject(nestedChildFieldName);
-                                if (nestedChildObj == null) {
-                                    LOGGER.error("Failed to find " + nestedChildFieldName + " in " + childObj.toString());
-                                } else {
-                                    List<String> grandChildFieldNames = grandChildEntry.getValue();
-                                    for (int k = 0; k < grandChildFieldNames.size(); k++) {
-                                        Object obj = nestedChildObj.get(grandChildFieldNames.get(i));
-                                        if (obj == null) {
-                                            LOGGER.error("Failed to find " + grandChildFieldNames.get(k) + " in nested child " + nestedChildObj.toString());
-                                        } else {
-                                            newChildObject.put(grandChildFieldNames.get(k), obj);
-                                        }
+                            if (outputFieldType.equals("json")) {
+                                JSONObject outputObj = new JSONObject(obj.toString());
+                                newValue.put(newFieldName, jsonMap(outputObj));
+                            } else if (outputFieldType.equals("json_array")) {
+                                JSONArray outputObj = new JSONArray(obj.toString());
+                                ArrayList<Map<String, Object>> outputArray = new ArrayList<Map<String, Object>>();
+                                for (int j = 0; j < outputObj.length(); j++) {
+                                    if (j < 10) {
+                                        JSONObject o = outputObj.getJSONObject(j);
+                                        outputArray.add(jsonMap(o));
                                     }
                                 }
+                                newValue.put(newFieldName, outputArray);
+                            } else {
+                                newValue.put(newFieldName, obj);
                             }
-                            // Convert the JSON object to a map before storing it.
-                            Map<String, Object> output = childObj.toMap();
-                            newValue.put(newFieldName, output);
                         }
                     }
                 } else {
