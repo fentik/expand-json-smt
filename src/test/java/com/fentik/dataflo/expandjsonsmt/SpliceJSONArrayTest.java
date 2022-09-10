@@ -26,8 +26,8 @@ import java.util.ArrayList;
 
 import static org.junit.Assert.*;
 
-public class ExpandJSONTest {
-    private ExpandJSON<SinkRecord> xform = new ExpandJSON.Value<>();
+public class SpliceJSONArrayTest {
+    private SpliceJSONArray<SinkRecord> xform = new SpliceJSONArray.Value<>();
 
     @After
     public void teardown() {

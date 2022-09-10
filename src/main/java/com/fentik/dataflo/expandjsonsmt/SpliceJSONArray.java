@@ -40,31 +40,31 @@ import static org.apache.kafka.connect.transforms.util.Requirements.requireMap;
 /**
  * Main project class implementing JSON string transformation.
  */
-abstract class ExpandJSON<R extends ConnectRecord<R>> implements Transformation<R> {
+abstract class SpliceJSONArray<R extends ConnectRecord<R>> implements Transformation<R> {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(ExpandJSON.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(SpliceJSONArray.class);
 
     interface ConfigName {
-        String TARGET_JSON_ARRAY = "targetField";
+        String TARGET_FIELD = "targetField";
         String SPLICE_FIELD = "spliceField";
         String OUTPUT_FIELD = "outputField";
         String OUTPUT_FIELD_TYPE = "outputFieldType";
     }
 
     private static final ConfigDef CONFIG_DEF = new ConfigDef()
-            .define(ConfigName.TARGET_JSON_ARRAY, ConfigDef.Type.STRING, "", ConfigDef.Importance.MEDIUM,
-                    "Source field name. This field will be expanded to a json array object.")
+            .define(ConfigName.TARGET_FIELD, ConfigDef.Type.STRING, "", ConfigDef.Importance.MEDIUM,
+                    "Target field name. The value should be a string representing JSON Array.")
             .define(ConfigName.SPLICE_FIELD, ConfigDef.Type.STRING, "", ConfigDef.Importance.MEDIUM,
-                    "The name of the child field that should be used to flatten the array object.")
+                    "The name of the field in targetField that is used to splice new entries into the record. The value of the field is used as a prefix for the new field name.")
             .define(ConfigName.OUTPUT_FIELD, ConfigDef.Type.STRING, "", ConfigDef.Importance.MEDIUM,
-                    "List of path for variables in the json object that should be stored in the output")
+                    "(Optional) - The field in the json object that should be emitted. If not provided, the entire object is returned as value of the new spliced key.")
             .define(ConfigName.OUTPUT_FIELD_TYPE, ConfigDef.Type.STRING, "", ConfigDef.Importance.MEDIUM,
-                    "If the output field is JSON or JSON object, set it to 'json' or 'json_array'");
+                    "If the output field is JSON object or JSON array, set it to 'json' or 'json_array'");
 
     private static final String PURPOSE = "expand json";
 
     private String targetFieldName;
-    private String childFieldName;
+    private String spliceKeyFieldName;
     private String outputFieldName;
     private String outputFieldType;
 
@@ -72,8 +72,8 @@ abstract class ExpandJSON<R extends ConnectRecord<R>> implements Transformation<
     @Override
     public void configure(Map<String, ?> configs) {
         final SimpleConfig config = new SimpleConfig(CONFIG_DEF, configs);
-        targetFieldName = config.getString(ConfigName.TARGET_JSON_ARRAY);
-        childFieldName = config.getString(ConfigName.SPLICE_FIELD);
+        targetFieldName = config.getString(ConfigName.TARGET_FIELD);
+        spliceKeyFieldName = config.getString(ConfigName.SPLICE_FIELD);
         outputFieldName = config.getString(ConfigName.OUTPUT_FIELD);
         outputFieldType = config.getString(ConfigName.OUTPUT_FIELD_TYPE);
     }
@@ -117,7 +117,7 @@ abstract class ExpandJSON<R extends ConnectRecord<R>> implements Transformation<
         try {
             Object recordValue = operatingValue(record);
             if (recordValue == null) {
-                LOGGER.info("Expandjson record is null");
+                LOGGER.info("SpliceJSONArray record is null");
                 LOGGER.info(record.toString());
                 return record;
             }
@@ -138,14 +138,25 @@ abstract class ExpandJSON<R extends ConnectRecord<R>> implements Transformation<
                     JSONArray array = new JSONArray(e.getValue().toString());
                     for (int i = 0; i < array.length(); i++) {
                         JSONObject childObj = array.getJSONObject(i);
-                        Object childField = childObj.get(childFieldName);
-                        if (childField != null) {
-                            String newFieldName = fieldName + "_" + childField.toString();
+                        Object keyFieldValue = childObj.get(spliceKeyFieldName);
+                        if (keyFieldValue == null) {
+                            LOGGER.error("Failed to find splice key " + spliceKeyFieldName + " in " + childObj.toString());
+                            // We did not find the spliceKeyFieldName in the obj. So, we skip it.
+                            continue;
+                        }
+                        String newFieldName = targetFieldName + "_" + keyFieldValue.toString();
+                        if (outputFieldName == null) {
+                            // There was no output field provided. So, we output the entire obj.
+                            newValue.put(newFieldName, jsonMap(childObj));
+                        } else{
                             Object obj = childObj.get(outputFieldName);
                             if (obj == null) {
                                 LOGGER.error("Failed to find " + outputFieldName + " in " + childObj.toString());
+                                // If there is no field matching outputFieldName, skip it.
                                 continue;
                             }
+                            // Handle JSON and JSON_ARRAY types separately since we have to deserialize them in
+                            // a manner that's compatible with JSONConvertor.
                             if (outputFieldType.equals("json")) {
                                 JSONObject outputObj = new JSONObject(obj.toString());
                                 newValue.put(newFieldName, jsonMap(outputObj));
@@ -170,7 +181,7 @@ abstract class ExpandJSON<R extends ConnectRecord<R>> implements Transformation<
             }
             return newRecord(record, null, newValue);
         } catch (DataException e) {
-            LOGGER.warn("ExpandJSON fields missing from record: " + record.toString(), e);
+            LOGGER.warn("SpliceJSONArray fields missing from record: " + record.toString(), e);
             return record;
         }
     }
@@ -189,7 +200,7 @@ abstract class ExpandJSON<R extends ConnectRecord<R>> implements Transformation<
 
     protected abstract R newRecord(R record, Schema updatedSchema, Object updatedValue);
 
-    public static class Value<R extends ConnectRecord<R>> extends ExpandJSON<R> {
+    public static class Value<R extends ConnectRecord<R>> extends SpliceJSONArray<R> {
 
         @Override
         protected Schema operatingSchema(R record) {
