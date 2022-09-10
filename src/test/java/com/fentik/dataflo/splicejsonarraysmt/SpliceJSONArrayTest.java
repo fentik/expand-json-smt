@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.fentik.dataflo.expandjsonsmt;
+package com.fentik.dataflo.splicejsonarraysmt;
 
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.junit.After;

@@ -3,8 +3,8 @@
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 
-	<groupId>com.fentik.dataflo.expandjsonsmt</groupId>
-	<artifactId>kafka-connect-smt-expandjsonsmt</artifactId>
+	<groupId>com.fentik.dataflo.splicejsonarraysmt</groupId>
+	<artifactId>kafka-connect-smt-splicejsonarraysmt</artifactId>
 	<version>0.0.7</version>
 
 	<repositories>
@@ -139,7 +139,7 @@
 					<archive>
 						<manifest>
 							<addClasspath>true</addClasspath>
-							<mainClass>com.redhat.insights.expandjsonsmt.ExpandJSON</mainClass>
+							<mainClass>com.fentik.dataflo.splicejsonarraysmt.SpliceJSONArray</mainClass>
 						</manifest>
 					</archive>
 				</configuration>
