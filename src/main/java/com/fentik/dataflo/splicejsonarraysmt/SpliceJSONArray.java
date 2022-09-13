@@ -49,6 +49,7 @@ abstract class SpliceJSONArray<R extends ConnectRecord<R>> implements Transforma
         String SPLICE_FIELD = "spliceField";
         String OUTPUT_FIELD = "outputField";
         String OUTPUT_FIELD_TYPE = "outputFieldType";
+        String NEW_TARGET_FIELD_PREFIX = "newTargetFieldPrefix";
     }
 
     private static final ConfigDef CONFIG_DEF = new ConfigDef()
@@ -56,14 +57,17 @@ abstract class SpliceJSONArray<R extends ConnectRecord<R>> implements Transforma
                     "Target field name. The value should be a string representing JSON Array.")
             .define(ConfigName.SPLICE_FIELD, ConfigDef.Type.STRING, "", ConfigDef.Importance.MEDIUM,
                     "The name of the field in targetField that is used to splice new entries into the record. The value of the field is used as a prefix for the new field name.")
+            .define(ConfigName.NEW_TARGET_FIELD_PREFIX, ConfigDef.Type.STRING, "", ConfigDef.Importance.MEDIUM,
+                    "The prefix of the new output field name.")
             .define(ConfigName.OUTPUT_FIELD, ConfigDef.Type.STRING, "", ConfigDef.Importance.MEDIUM,
                     "(Optional) - The field in the json object that should be emitted. If not provided, the entire object is returned as value of the new spliced key.")
             .define(ConfigName.OUTPUT_FIELD_TYPE, ConfigDef.Type.STRING, "", ConfigDef.Importance.MEDIUM,
                     "If the output field is JSON object or JSON array, set it to 'json' or 'json_array'");
 
-    private static final String PURPOSE = "expand json";
+    private static final String PURPOSE = "Splice JSON";
 
     private String targetFieldName;
+    private String newTargetFieldNamePrefix;
     private String spliceKeyFieldName;
     private String outputFieldName;
     private String outputFieldType;
@@ -73,7 +77,18 @@ abstract class SpliceJSONArray<R extends ConnectRecord<R>> implements Transforma
     public void configure(Map<String, ?> configs) {
         final SimpleConfig config = new SimpleConfig(CONFIG_DEF, configs);
         targetFieldName = config.getString(ConfigName.TARGET_FIELD);
+        if (targetFieldName.isEmpty()) {
+            LOGGER.error("The required option targtField is empty.");
+        }
         spliceKeyFieldName = config.getString(ConfigName.SPLICE_FIELD);
+        if (spliceKeyFieldName.isEmpty()) {
+            LOGGER.error("The required option spliceField is empty.");
+        }
+        newTargetFieldNamePrefix = config.getString(ConfigName.NEW_TARGET_FIELD_PREFIX);
+        if (newTargetFieldNamePrefix.isEmpty()) {
+            LOGGER.info("Setting the new target field name prefix to " + targetFieldName);
+            newTargetFieldNamePrefix = targetFieldName;
+        }
         outputFieldName = config.getString(ConfigName.OUTPUT_FIELD);
         outputFieldType = config.getString(ConfigName.OUTPUT_FIELD_TYPE);
     }
@@ -144,7 +159,7 @@ abstract class SpliceJSONArray<R extends ConnectRecord<R>> implements Transforma
                             // We did not find the spliceKeyFieldName in the obj. So, we skip it.
                             continue;
                         }
-                        String newFieldName = targetFieldName + "_" + keyFieldValue.toString();
+                        String newFieldName = newTargetFieldNamePrefix + "__" + keyFieldValue.toString();
                         if (outputFieldName == null) {
                             // There was no output field provided. So, we output the entire obj.
                             newValue.put(newFieldName, jsonMap(childObj));
@@ -164,10 +179,8 @@ abstract class SpliceJSONArray<R extends ConnectRecord<R>> implements Transforma
                                 JSONArray outputObj = new JSONArray(obj.toString());
                                 ArrayList<Map<String, Object>> outputArray = new ArrayList<Map<String, Object>>();
                                 for (int j = 0; j < outputObj.length(); j++) {
-                                    if (j < 10) {
-                                        JSONObject o = outputObj.getJSONObject(j);
-                                        outputArray.add(jsonMap(o));
-                                    }
+                                    JSONObject o = outputObj.getJSONObject(j);
+                                    outputArray.add(jsonMap(o));
                                 }
                                 newValue.put(newFieldName, outputArray);
                             } else {

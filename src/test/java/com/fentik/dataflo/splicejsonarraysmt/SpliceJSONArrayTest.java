@@ -75,6 +75,7 @@ public class SpliceJSONArrayTest {
         props.put("spliceField", "team_category_ordinal_number");
         props.put("outputField", "custom_field_values");
         props.put("outputFieldType", "json_array");
+        props.put("newTargetFieldPrefix", "agg_person_custom_field");
 
         xform.configure(props);
 
@@ -82,6 +83,8 @@ public class SpliceJSONArrayTest {
         final Map<String, Object> value = new HashMap<>();
         value.put("name", "Josef");
         value.put("age", 42);
+//        value.put("agg__person_custom_fields", value: "[{\"custom_field_values\":\"[{\\\"date_ts\\\":null,\\\"option_id\\":20439,\\"option_value\\":\\"\\"}]","team_category_ordinal_number":7},{"custom_field_values":"[{\\"date_ts\\":null,\\"option_id\\":20440,\\"option_value\\":\\"\\"}]\",\"team_category_ordinal_number\":8}]");
+
         value.put("agg_person_custom_fields", "[{\"custom_field_values\":\"[{\\\"date_ts\\\":null,\\\"option_id\\\":22702,\\\"option_value\\\":\\\"AI\\\"},{\\\"date_ts\\\":null,\\\"option_id\\\":22694,\\\"option_value\\\":\\\"MI\\\"}]\",\"team_category_ordinal_number\":1}]");
 
         final SinkRecord record = new SinkRecord("test", 0, null, null, null, value, 0);
@@ -90,7 +93,7 @@ public class SpliceJSONArrayTest {
         final Map<String, Object> updatedValue = (Map<String, Object>) transformedRecord.value();
         assertEquals("Josef", updatedValue.get("name"));
         assertEquals(42, updatedValue.get("age"));
-        ArrayList<Map<String, Object>> output = (ArrayList<Map<String, Object>>) updatedValue.get("agg_person_custom_fields_1");
+        ArrayList<Map<String, Object>> output = (ArrayList<Map<String, Object>>) updatedValue.get("agg_person_custom_field__1");
         assertEquals(2, output.size());
         assertEquals(22702, output.get(0).get("option_id"));
         assertEquals("AI", output.get(0).get("option_value"));
