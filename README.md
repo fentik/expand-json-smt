@@ -23,7 +23,7 @@ If the Kafka message value is of the form:
 
 {
  team_id: 1
- people_location = [
+ people_locations = [
 		     { "person_id": 1,
 		       "address" = {
 		          'city': 'San Mateo',
@@ -42,7 +42,8 @@ If the Kafka message value is of the form:
 and the transformer config is
 
 {
-  targetField: person_location
+  targetField: person_locations
+  newTargetFieldPrefix: person_location
   spliceField: person_id
   outputField: address
   outputType: json
@@ -66,5 +67,6 @@ mvn package
 ## Installation
 After build copy file `target/kafka-connect-smt-splitjsonarraysmt-0.0.7-assemble-all.jar`
 
+KAFKA_CONNECT_PLUGINS_DIR=/opt/kafka/connect/.
 cp ./target/target/kafka-connect-smt-splitjsonarraysmt-0.0.7-assemble-all.jar $KAFKA_CONNECT_PLUGINS_DIR
 
