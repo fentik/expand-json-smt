@@ -78,7 +78,7 @@ abstract class SpliceJSONArray<R extends ConnectRecord<R>> implements Transforma
         final SimpleConfig config = new SimpleConfig(CONFIG_DEF, configs);
         targetFieldName = config.getString(ConfigName.TARGET_FIELD);
         if (targetFieldName.isEmpty()) {
-            LOGGER.error("The required option targtField is empty.");
+            LOGGER.error("The required option targetField is empty.");
         }
         spliceKeyFieldName = config.getString(ConfigName.SPLICE_FIELD);
         if (spliceKeyFieldName.isEmpty()) {
@@ -149,8 +149,13 @@ abstract class SpliceJSONArray<R extends ConnectRecord<R>> implements Transforma
             for (Map.Entry<String, Object> e : value.entrySet()) {
                 final String fieldName = e.getKey();
                 if (targetFieldName.equals(fieldName)) {
+                    Object targetValue = e.getValue();
+                    if (targetValue == null) {
+                        newValue.put(e.getKey(), e.getValue());
+                        continue;
+                    }
                     // We assume the field is a string that encodes a JSON array.
-                    JSONArray array = new JSONArray(e.getValue().toString());
+                    JSONArray array = new JSONArray(targetValue.toString());
                     for (int i = 0; i < array.length(); i++) {
                         JSONObject childObj = array.getJSONObject(i);
                         Object keyFieldValue = childObj.get(spliceKeyFieldName);
