@@ -65,7 +65,7 @@ the output will be:
 mvn package
 
 ## Installation
-After build copy file `target/kafka-connect-smt-splitjsonarraysmt-0.0.7-assemble-all.jar`
+After build copy file `target/kafka-connect-smt-splicejsonarraysmt-0.0.7-assemble-all.jar`
 
 KAFKA_CONNECT_PLUGINS_DIR=/opt/kafka/connect/.
 cp ./target/target/kafka-connect-smt-splitjsonarraysmt-0.0.7-assemble-all.jar $KAFKA_CONNECT_PLUGINS_DIR
