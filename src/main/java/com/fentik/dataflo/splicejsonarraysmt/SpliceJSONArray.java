@@ -132,8 +132,6 @@ abstract class SpliceJSONArray<R extends ConnectRecord<R>> implements Transforma
         try {
             Object recordValue = operatingValue(record);
             if (recordValue == null) {
-                LOGGER.info("SpliceJSONArray record is null");
-                LOGGER.info(record.toString());
                 return record;
             }
             // Walk through the record.
